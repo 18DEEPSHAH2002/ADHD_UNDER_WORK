@@ -3,6 +3,11 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime
 import io
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.cidfonts import UnicodeCIDFont
 
 st.set_page_config(page_title="Parent ADHD Screening", layout="centered")
 
@@ -21,7 +26,7 @@ TEXTS = {
         "hyper": "Hyperactivity & Impulsivity Symptoms",
         "results": "📊 Screening Results",
         "interpret": "Interpretation",
-        "download": "📥 Download Responses",
+        "download": "📥 Download Responses (CSV)",
         "score_label": "Total Score",
         "interpret_low": "Likely typical behavior (no ADHD symptoms).",
         "interpret_mid": "Some ADHD-like traits present. Monitoring recommended.",
@@ -34,7 +39,7 @@ TEXTS = {
         "hyper": "अत्यधिक सक्रियता और आवेगशीलता के लक्षण",
         "results": "📊 परिणाम",
         "interpret": "व्याख्या",
-        "download": "📥 उत्तर डाउनलोड करें",
+        "download": "📥 उत्तर डाउनलोड करें (CSV)",
         "score_label": "कुल स्कोर",
         "interpret_low": "सामान्य व्यवहार (एडीएचडी के लक्षण नहीं)।",
         "interpret_mid": "कुछ एडीएचडी जैसे लक्षण मौजूद हैं। निगरानी की सलाह दी जाती है।",
@@ -47,7 +52,7 @@ TEXTS = {
         "hyper": "ਅਤਿਅਧਿਕ ਸਰਗਰਮੀ ਅਤੇ ਜਜ਼ਬਾਤੀ ਲੱਛਣ",
         "results": "📊 ਨਤੀਜੇ",
         "interpret": "ਵਿਆਖਿਆ",
-        "download": "📥 ਜਵਾਬ ਡਾਊਨਲੋਡ ਕਰੋ",
+        "download": "📥 ਜਵਾਬ ਡਾਊਨਲੋਡ ਕਰੋ (CSV)",
         "score_label": "ਕੁੱਲ ਸਕੋਰ",
         "interpret_low": "ਸਧਾਰਣ ਵਿਵਹਾਰ (ADHD ਦੇ ਲੱਛਣ ਨਹੀਂ)।",
         "interpret_mid": "ਕੁਝ ADHD ਵਰਗੇ ਲੱਛਣ ਮੌਜੂਦ ਹਨ। ਨਿਗਰਾਨੀ ਦੀ ਲੋੜ ਹੈ।",
@@ -134,9 +139,40 @@ QUESTIONS = {
 scale_options = {
     0: {"English": "0 — Never or Rarely", "हिन्दी": "0 — कभी नहीं / बहुत कम", "ਪੰਜਾਬੀ": "0 — ਕਦੇ ਨਹੀਂ / ਬਹੁਤ ਘੱਟ"},
     1: {"English": "1 — Sometimes", "हिन्दी": "1 — कभी-कभी", "ਪੰਜਾਬੀ": "1 — ਕਦੇ-ਕਦੇ"},
-    2: {"English": "2 — Often", "हिन्दी": "2 — अक्सर", "ਪੰਜਾਬੀ": "2 — ਅਕਸਰ"},
-    3: {"English": "3 — Very Often", "हिन्दी": "3 — बहुत बार", "ਪੰਜਾਬੀ": "3 — ਬਹੁਤ ਵਾਰ"},
+    2: {"English": "2 — Often", "हिन्दੀ": "2 — अक्सर", "ਪੰਜਾਬੀ": "2 — ਅਕਸਰ"},
+    3: {"English": "3 — Very Often", "हिन्दੀ": "3 — बहुत बार", "ਪੰਜਾਬੀ": "3 — ਬਹੁਤ ਵਾਰ"},
 }
+
+# --- PDF generator ---
+def generate_pdf(responses, total_score, interpretation, lang):
+    buffer = io.BytesIO()
+
+    # Register Unicode font (works for Hindi/Punjabi too)
+    pdfmetrics.registerFont(UnicodeCIDFont('HeiseiMin-W3'))
+
+    doc = SimpleDocTemplate(buffer, pagesize=A4)
+    styles = getSampleStyleSheet()
+    story = []
+
+    story.append(Paragraph(TEXTS[lang]["title"], styles["Title"]))
+    story.append(Spacer(1, 12))
+    story.append(Paragraph(f"<b>{TEXTS[lang]['instructions']}</b>", styles["Normal"]))
+    story.append(Spacer(1, 12))
+
+    story.append(Paragraph("<b>Responses:</b>", styles["Heading2"]))
+    for q, ans in responses.items():
+        story.append(Paragraph(f"{q}: {ans}", styles["Normal"]))
+    story.append(Spacer(1, 12))
+
+    story.append(Paragraph(f"<b>{TEXTS[lang]['score_label']}: {total_score}</b>", styles["Heading2"]))
+    story.append(Paragraph(f"<b>{TEXTS[lang]['interpret']}:</b> {interpretation}", styles["Normal"]))
+    story.append(Spacer(1, 12))
+
+    story.append(Paragraph(f"Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles["Normal"]))
+
+    doc.build(story)
+    buffer.seek(0)
+    return buffer
 
 # --- UI ---
 st.title(TEXTS[lang]["title"])
@@ -160,7 +196,6 @@ for i, q in enumerate(QUESTIONS[lang]["hyper"], 1):
 
 # Submit
 if st.button("Submit / सबमिट / ਜਮ੍ਹਾਂ ਕਰੋ"):
-    # convert responses to numeric
     scores = []
     for ans in responses.values():
         for k, v in scale_options.items():
@@ -171,13 +206,16 @@ if st.button("Submit / सबमिट / ਜਮ੍ਹਾਂ ਕਰੋ"):
     st.subheader(TEXTS[lang]["results"])
     st.metric(TEXTS[lang]["score_label"], total_score)
 
-    st.subheader(TEXTS[lang]["interpret"])
+    # Interpretation
     if total_score <= 12:
-        st.success(TEXTS[lang]["interpret_low"])
+        interpretation = TEXTS[lang]["interpret_low"]
+        st.success(interpretation)
     elif total_score <= 24:
-        st.warning(TEXTS[lang]["interpret_mid"])
+        interpretation = TEXTS[lang]["interpret_mid"]
+        st.warning(interpretation)
     else:
-        st.error(TEXTS[lang]["interpret_high"])
+        interpretation = TEXTS[lang]["interpret_high"]
+        st.error(interpretation)
 
     # Save to CSV
     df = pd.DataFrame([responses])
@@ -191,4 +229,13 @@ if st.button("Submit / सबमिट / ਜਮ੍ਹਾਂ ਕਰੋ"):
         data=csv_buffer.getvalue(),
         file_name="adhd_screening.csv",
         mime="text/csv",
+    )
+
+    # Save PDF report
+    pdf_buffer = generate_pdf(responses, total_score, interpretation, lang)
+    st.download_button(
+        label="📄 Download Report (PDF)",
+        data=pdf_buffer,
+        file_name="adhd_screening_report.pdf",
+        mime="application/pdf",
     )
